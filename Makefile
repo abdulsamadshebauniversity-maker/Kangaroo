@@ -8,8 +8,9 @@ ifdef gpu
 SRC = SECPK1/IntGroup.cpp main.cpp SECPK1/Random.cpp \
       Timer.cpp SECPK1/Int.cpp SECPK1/IntMod.cpp \
       SECPK1/Point.cpp SECPK1/SECP256K1.cpp \
-      GPU/GPUEngine.o Kangaroo.cpp HashTable.cpp \
-      Backup.cpp Thread.cpp Check.cpp Network.cpp Merge.cpp PartMerge.cpp
+      GPU/GPUEngine.o GPU/GPULaunch.o GPU/GPUBsgs.o GPU/GPUXPoint.o \
+      Kangaroo.cpp HashTable.cpp Backup.cpp Thread.cpp Check.cpp Network.cpp \
+      Merge.cpp PartMerge.cpp
 
 OBJDIR = obj
 
@@ -17,8 +18,8 @@ OBJET = $(addprefix $(OBJDIR)/, \
       SECPK1/IntGroup.o main.o SECPK1/Random.o \
       Timer.o SECPK1/Int.o SECPK1/IntMod.o \
       SECPK1/Point.o SECPK1/SECP256K1.o \
-      GPU/GPUEngine.o Kangaroo.o HashTable.o Thread.o \
-      Backup.o Check.o Network.o Merge.o PartMerge.o)
+      GPU/GPUEngine.o GPU/GPULaunch.o GPU/GPUBsgs.o GPU/GPUXPoint.o \
+      Kangaroo.o HashTable.o Backup.o Check.o Network.o Merge.o PartMerge.o)
 
 else
 
@@ -40,9 +41,17 @@ OBJET = $(addprefix $(OBJDIR)/, \
 endif
 
 CXX        = g++
-CUDA       = /usr/local/cuda-8.0
-CXXCUDA    = /usr/bin/g++-4.8
-NVCC       = $(CUDA)/bin/nvcc
+# Toolchain is autodetected ($(CUDA) and $(CXXCUDA) can be overridden on the
+# command line). The old hardcoded cuda-8.0 / g++-4.8 pair does not exist on
+# current distributions and cannot compile the C++11 headers of the project.
+CUDA      ?= $(shell if [ -d /usr/local/cuda ]; then echo /usr/local/cuda; \
+              elif [ -n "$$CUDA_HOME" ]; then echo $$CUDA_HOME; \
+              else dirname $$(dirname $$(which nvcc 2>/dev/null)) 2>/dev/null; fi)
+NVCC      ?= $(if $(CUDA),$(CUDA)/bin/nvcc,/usr/bin/nvcc)
+CXXCUDA   ?= $(CXX)
+CCAP      ?= $(shell $(NVCC) --list-gpus 2>/dev/null | head -1 | \
+              sed -e 's/.*sm_//' -e 's/).*//' 2>/dev/null)
+ccap      ?= 61
 
 ifdef gpu
 
@@ -75,6 +84,12 @@ $(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu
 	$(NVCC) -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC -ccbin $(CXXCUDA) -m64 -O2 -I$(CUDA)/include -gencode=arch=compute_$(ccap),code=sm_$(ccap) -o $(OBJDIR)/GPU/GPUEngine.o -c GPU/GPUEngine.cu
 endif
 endif
+
+GPU/GPULaunch.o: GPU/GPULaunch.cu GPU/GPULaunch.h GPU/GPUXPointKernel.h GPU/GPUBsgsKernel.h
+	$(NVCC) -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC \
+	  -ccbin $(CXXCUDA) -m64 -O2 -I$(CUDA)/include -I. \
+	  -gencode=arch=compute_$(ccap),code=sm_$(ccap) -o GPU/GPULaunch.o -c GPU/GPULaunch.cu
+	mv GPU/GPULaunch.o $(OBJDIR)/GPU/GPULaunch.o
 
 $(OBJDIR)/%.o : %.cpp
 	$(CXX) $(CXXFLAGS) -o $@ -c $<
@@ -141,6 +156,13 @@ check-xpoint: $(TESTDIR)/test_xpoint
 $(TESTDIR)/test_xpoint: tests/test_xpoint.cpp GPU/GPUXPoint.cpp GPU/GPUXPoint.h GPU/GPUXPointKernel.h GPU/GPUPointWalk.h $(TESTCORE)
 	@mkdir -p $(TESTDIR)
 	$(CXX) $(TESTFLAGS) -o $@ tests/test_xpoint.cpp GPU/GPUXPoint.cpp $(TESTCORE)
+
+bench: $(TESTDIR)/bench_gpu
+	@$(TESTDIR)/bench_gpu
+
+$(TESTDIR)/bench_gpu: tests/bench_gpu.cpp GPU/GPUBsgs.cpp GPU/GPUXPoint.cpp GPU/GPUBsgs.h GPU/GPUXPoint.h $(TESTCORE)
+	@mkdir -p $(TESTDIR)
+	$(CXX) $(TESTFLAGS) -o $@ tests/bench_gpu.cpp GPU/GPUBsgs.cpp GPU/GPUXPoint.cpp $(TESTCORE)
 
 check: check-arithmetic check-pointwalk check-xpoint check-bsgs
 

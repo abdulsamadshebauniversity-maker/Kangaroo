@@ -72,7 +72,7 @@
 // Complete addition with the inversion computed on the fly.
 // Used only a couple of times per giant step (never inside the walk).
 // ---------------------------------------------------------------------------------
-__device__ void kwAddPointAuto(uint64_t *rx, uint64_t *ry,
+KW_EMUL_STATIC __device__ void kwAddPointAuto(uint64_t *rx, uint64_t *ry,
                                uint64_t *px, uint64_t *py,
                                uint64_t *qx, uint64_t *qy) {
 

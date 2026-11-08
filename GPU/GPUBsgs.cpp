@@ -27,6 +27,13 @@
 #include "GPUBsgs.h"
 #include "GPUBsgsKernel.h"
 
+// monotonic seconds (Timer::get_tick() is relative to Timer::Init())
+#include "GPULaunch.h"
+
+#ifdef KW_EMULATE
+#include "GPULaunchEmul.h"      // tests / CPU-only builds: SIMT emulator
+#endif
+
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
@@ -185,14 +192,14 @@ void GPUBSGS::BuildTable() {
   bp.nbBaby = nbBaby;
   bp.groupPerThread = groupPerThread;
 
-  double t0 = Timer::get_tick();
-  KW_LAUNCH(kwBabyKernel, 1, nbThread, devKangaroo, devGT, devBabyX, bp);
+  double t0 = kwSeconds();
+  kwLaunchBaby(1, (int)nbThread, devKangaroo, devGT, devBabyX, &bp);
   cudaDeviceSynchronize();
-  timerBaby = Timer::get_tick() - t0;
+  timerBaby = kwSeconds() - t0;
 
   // fingerprints of the babies (on the device)
   uint32_t nbBl = (uint32_t)((nbBaby + 255) / 256);
-  KW_LAUNCH(kwFingerprintKernel, nbBl, 256, devBabyX, devBabyFp, (uint32_t)nbBaby);
+  kwLaunchFingerprint((int)nbBl, 256, devBabyX, devBabyFp, (uint32_t)nbBaby);
   cudaDeviceSynchronize();
 
   // counting sort on the host: exact bucket table, no capacity limit
@@ -330,11 +337,11 @@ bool GPUBSGS::Search() {
   gp.nbBucket = nbBucket;
   gp.maxFound = maxFound;
 
-  double t0 = Timer::get_tick();
-  KW_LAUNCH(kwGiantKernel, 1, nbThread, devKangarooGiant, devBucketStart,
-            devBucketFp, devBucketPos, devResults, gp);
+  double t0 = kwSeconds();
+  kwLaunchGiant(1, (int)nbThread, devKangarooGiant, devBucketStart,
+                devBucketFp, devBucketPos, devResults, &gp);
   cudaDeviceSynchronize();
-  timerGiant = Timer::get_tick() - t0;
+  timerGiant = kwSeconds() - t0;
 
   std::vector<uint32_t> res(1 + (size_t)maxFound * KW_GIANT_U32, 0);
   cudaMemcpy(res.data(), devResults, res.size() * sizeof(uint32_t), cudaMemcpyDeviceToHost);

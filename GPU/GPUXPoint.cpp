@@ -20,6 +20,13 @@
 */
 
 #include "GPUXPoint.h"
+#include "GPULaunch.h"
+
+// monotonic seconds (Timer::get_tick() is relative to Timer::Init())
+
+#ifdef KW_EMULATE
+#include "GPULaunchEmul.h"      // tests / CPU-only builds: SIMT emulator
+#endif
 #include "../Timer.h"
 
 #include <cstdio>
@@ -180,11 +187,11 @@ uint32_t GPUXPoint::Search() {
 
   uint64_t cursor = 0;
 
-  double t0 = Timer::get_tick();
-  KW_LAUNCH(kwXPointKernel, 1, nbThread, devKangaroo, devTable, devTargets,
-            devResults, p, &cursor);
+  double t0 = kwSeconds();
+  kwLaunchXPoint(1, (int)nbThread, devKangaroo, devTable, devTargets,
+                 devResults, &p, &cursor);
   cudaDeviceSynchronize();
-  timerScan = Timer::get_tick() - t0;
+  timerScan = kwSeconds() - t0;
 
   std::vector<uint32_t> res(1 + (size_t)maxFound * KW_MATCH_U32, 0);
   cudaMemcpy(res.data(), devResults, res.size() * sizeof(uint32_t), cudaMemcpyDeviceToHost);

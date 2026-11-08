@@ -83,6 +83,23 @@ KW_HOST_DEVICE uint64_t kwFingerprint(const uint64_t *x) {
 }
 
 // ---------------------------------------------------------------------------------
+// Monotonic wall clock (seconds), used by the host drivers for the timings.
+// ---------------------------------------------------------------------------------
+#if defined(_WIN32)
+#include <windows.h>
+inline double kwSeconds() {
+  LARGE_INTEGER f, t; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t);
+  return (double)t.QuadPart / (double)f.QuadPart;
+}
+#else
+#include <sys/time.h>
+inline double kwSeconds() {
+  struct timeval tv; gettimeofday(&tv, NULL);
+  return (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
+}
+#endif
+
+// ---------------------------------------------------------------------------------
 // Field primitives
 // ---------------------------------------------------------------------------------
 
