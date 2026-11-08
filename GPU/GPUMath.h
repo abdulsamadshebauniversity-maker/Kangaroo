@@ -23,6 +23,44 @@
 #define NBBLOCK 5
 #define BIFULLSIZE 40
 
+// ---------------------------------------------------------------------------------
+
+#include "GPUCompat.h"
+#include "../Constants.h"
+
+// Under KW_EMULATE the device functions of this header are plain host
+// functions with external linkage, so the translation units that include it
+// must not duplicate them: the emulation marks them inline (see the note in
+// GPUCompat.h). The kangaroo load/store helpers are only used by GPUEngine.cu.
+#if KW_EMULATE
+#define KW_EMUL_STATIC static
+#else
+#define KW_EMUL_STATIC
+#endif
+
+// Number of 64 bits words stored per kangaroo in GPU memory
+// (x[4] y[4] dist[2] and lastJump when symmetry is enabled)
+#ifndef KSIZE
+#ifdef USE_SYMMETRY
+#define KSIZE 11
+#else
+#define KSIZE 10
+#endif
+#endif
+
+// Assembly directives
+//
+// When compiled by nvcc with the PTX backend (KW_HAVE_PTX_ASM==1) these are the
+// original inline PTX primitives: the 64x64->128 bit operations of the whole
+// library go through the hardware carry flag, which is what makes the LSU
+// pipelines of the 256 bit arithmetic so dense.
+//
+// When compiled by a host compiler (KW_EMULATE==1) GPUCompat.h provides bit
+// exact emulations of the very same macros, so this file and everything built
+// on it can be unit tested without a GPU.
+
+#if KW_HAVE_PTX_ASM
+
 // Assembly directives
 #define UADDO(c, a, b) asm volatile ("add.cc.u64 %0, %1, %2;" : "=l"(c) : "l"(a), "l"(b) : "memory" );
 #define UADDC(c, a, b) asm volatile ("addc.cc.u64 %0, %1, %2;" : "=l"(c) : "l"(a), "l"(b) : "memory" );
@@ -46,6 +84,8 @@
 #define MADDC(r,a,b,c) asm volatile ("madc.hi.cc.u64 %0, %1, %2, %3;" : "=l"(r) : "l"(a), "l"(b), "l"(c) : "memory" );
 #define MADD(r,a,b,c) asm volatile ("madc.hi.u64 %0, %1, %2, %3;" : "=l"(r) : "l"(a), "l"(b), "l"(c));
 #define MADDS(r,a,b,c) asm volatile ("madc.hi.s64 %0, %1, %2, %3;" : "=l"(r) : "l"(a), "l"(b), "l"(c));
+
+#endif // KW_HAVE_PTX_ASM
 
 // Jump distance
 __device__ __constant__ uint64_t jD[NB_JUMP][2];
@@ -190,9 +230,9 @@ out[pos*ITEM_SIZE32 + 14] = ((uint32_t *)idx)[1]; \
 // ---------------------------------------------------------------------------------------
 
 #ifdef USE_SYMMETRY
-__device__ void LoadKangaroos(uint64_t *a,uint64_t px[GPU_GRP_SIZE][4],uint64_t py[GPU_GRP_SIZE][4],uint64_t dist[GPU_GRP_SIZE][2],uint64_t *jumps) {
+KW_EMUL_STATIC __device__ void LoadKangaroos(uint64_t *a,uint64_t px[GPU_GRP_SIZE][4],uint64_t py[GPU_GRP_SIZE][4],uint64_t dist[GPU_GRP_SIZE][2],uint64_t *jumps) {
 #else
-__device__ void LoadKangaroos(uint64_t * a,uint64_t px[GPU_GRP_SIZE][4],uint64_t py[GPU_GRP_SIZE][4],uint64_t dist[GPU_GRP_SIZE][2]) {
+KW_EMUL_STATIC __device__ void LoadKangaroos(uint64_t * a,uint64_t px[GPU_GRP_SIZE][4],uint64_t py[GPU_GRP_SIZE][4],uint64_t dist[GPU_GRP_SIZE][2]) {
 #endif
 
   __syncthreads();
@@ -224,7 +264,7 @@ __device__ void LoadKangaroos(uint64_t * a,uint64_t px[GPU_GRP_SIZE][4],uint64_t
 
 }
 
-__device__ void LoadDists(uint64_t* a,uint64_t dist[GPU_GRP_SIZE][2]) {
+KW_EMUL_STATIC __device__ void LoadDists(uint64_t* a,uint64_t dist[GPU_GRP_SIZE][2]) {
 
   __syncthreads();
 
@@ -240,7 +280,7 @@ __device__ void LoadDists(uint64_t* a,uint64_t dist[GPU_GRP_SIZE][2]) {
 
 }
 
-__device__ void LoadKangaroo(uint64_t* a,uint32_t stride,uint64_t px[4],uint64_t py[4]) {
+KW_EMUL_STATIC __device__ void LoadKangaroo(uint64_t* a,uint32_t stride,uint64_t px[4],uint64_t py[4]) {
 
   uint64_t* x64 = (uint64_t*)px;
   uint64_t* y64 = (uint64_t*)py;
@@ -257,7 +297,7 @@ __device__ void LoadKangaroo(uint64_t* a,uint32_t stride,uint64_t px[4],uint64_t
 
 }
 
-__device__ void LoadKangaroo(uint64_t* a,uint32_t stride,uint64_t px[4]) {
+KW_EMUL_STATIC __device__ void LoadKangaroo(uint64_t* a,uint32_t stride,uint64_t px[4]) {
 
   uint64_t* x64 = (uint64_t*)px;
 
@@ -271,9 +311,9 @@ __device__ void LoadKangaroo(uint64_t* a,uint32_t stride,uint64_t px[4]) {
 // ---------------------------------------------------------------------------------------
 
 #ifdef USE_SYMMETRY
-__device__ void StoreKangaroos(uint64_t *a,uint64_t px[GPU_GRP_SIZE][4],uint64_t py[GPU_GRP_SIZE][4],uint64_t dist[GPU_GRP_SIZE][2],uint64_t *jumps) {
+KW_EMUL_STATIC __device__ void StoreKangaroos(uint64_t *a,uint64_t px[GPU_GRP_SIZE][4],uint64_t py[GPU_GRP_SIZE][4],uint64_t dist[GPU_GRP_SIZE][2],uint64_t *jumps) {
 #else
-__device__ void StoreKangaroos(uint64_t * a,uint64_t px[GPU_GRP_SIZE][4],uint64_t py[GPU_GRP_SIZE][4],uint64_t dist[GPU_GRP_SIZE][2]) {
+KW_EMUL_STATIC __device__ void StoreKangaroos(uint64_t * a,uint64_t px[GPU_GRP_SIZE][4],uint64_t py[GPU_GRP_SIZE][4],uint64_t dist[GPU_GRP_SIZE][2]) {
 #endif
 
   __syncthreads();
@@ -304,7 +344,7 @@ __device__ void StoreKangaroos(uint64_t * a,uint64_t px[GPU_GRP_SIZE][4],uint64_
 
 }
 
-__device__ void StoreKangaroo(uint64_t* a,uint32_t stride,uint64_t px[4],uint64_t py[4]) {
+KW_EMUL_STATIC __device__ void StoreKangaroo(uint64_t* a,uint32_t stride,uint64_t px[4],uint64_t py[4]) {
 
   uint64_t* x64 = (uint64_t*)px;
   uint64_t* y64 = (uint64_t*)py;
@@ -321,7 +361,7 @@ __device__ void StoreKangaroo(uint64_t* a,uint32_t stride,uint64_t px[4],uint64_
 
 }
 
-__device__ void StoreDists(uint64_t* a,uint64_t dist[GPU_GRP_SIZE][2]) {
+KW_EMUL_STATIC __device__ void StoreDists(uint64_t* a,uint64_t dist[GPU_GRP_SIZE][2]) {
 
   __syncthreads();
 
@@ -338,7 +378,7 @@ __device__ void StoreDists(uint64_t* a,uint64_t dist[GPU_GRP_SIZE][2]) {
 
 // ---------------------------------------------------------------------------------------
 
-__device__ void ShiftR62(uint64_t r[5]) {
+KW_EMUL_STATIC __device__ void ShiftR62(uint64_t r[5]) {
 
   r[0] = (r[1] << 2) | (r[0] >> 62);
   r[1] = (r[2] << 2) | (r[1] >> 62);
@@ -349,7 +389,7 @@ __device__ void ShiftR62(uint64_t r[5]) {
 
 }
 
-__device__ void ShiftR62(uint64_t dest[5],uint64_t r[5],uint64_t carry) {
+KW_EMUL_STATIC __device__ void ShiftR62(uint64_t dest[5],uint64_t r[5],uint64_t carry) {
 
   dest[0] = (r[1] << 2) | (r[0] >> 62);
   dest[1] = (r[2] << 2) | (r[1] >> 62);
@@ -361,7 +401,7 @@ __device__ void ShiftR62(uint64_t dest[5],uint64_t r[5],uint64_t carry) {
 
 // ---------------------------------------------------------------------------------------
 
-__device__ void IMult(uint64_t *r,uint64_t *a,int64_t b) {
+KW_EMUL_STATIC __device__ void IMult(uint64_t *r,uint64_t *a,int64_t b) {
 
   uint64_t t[NBBLOCK];
 
@@ -389,7 +429,7 @@ __device__ void IMult(uint64_t *r,uint64_t *a,int64_t b) {
 
 }
 
-__device__ uint64_t IMultC(uint64_t* r,uint64_t* a,int64_t b) {
+KW_EMUL_STATIC __device__ uint64_t IMultC(uint64_t* r,uint64_t* a,int64_t b) {
 
   uint64_t t[NBBLOCK];
   uint64_t carry;
@@ -423,7 +463,7 @@ __device__ uint64_t IMultC(uint64_t* r,uint64_t* a,int64_t b) {
 
 // ---------------------------------------------------------------------------------------
 
-__device__ void MulP(uint64_t *r,uint64_t a) {
+KW_EMUL_STATIC __device__ void MulP(uint64_t *r,uint64_t a) {
 
   uint64_t ah;
   uint64_t al;
@@ -441,7 +481,7 @@ __device__ void MulP(uint64_t *r,uint64_t a) {
 
 // ---------------------------------------------------------------------------------------
 
-__device__ void ModNeg256(uint64_t *r,uint64_t *a) {
+KW_EMUL_STATIC __device__ void ModNeg256(uint64_t *r,uint64_t *a) {
 
   uint64_t t[4];
   USUBO(t[0],0ULL,a[0]);
@@ -457,7 +497,7 @@ __device__ void ModNeg256(uint64_t *r,uint64_t *a) {
 
 // ---------------------------------------------------------------------------------------
 
-__device__ void ModNeg256(uint64_t *r) {
+KW_EMUL_STATIC __device__ void ModNeg256(uint64_t *r) {
 
   uint64_t t[4];
   USUBO(t[0],0ULL,r[0]);
@@ -473,7 +513,7 @@ __device__ void ModNeg256(uint64_t *r) {
 
 // ---------------------------------------------------------------------------------------
 
-__device__ void ModSub256(uint64_t *r,uint64_t *a,uint64_t *b) {
+KW_EMUL_STATIC __device__ void ModSub256(uint64_t *r,uint64_t *a,uint64_t *b) {
 
   uint64_t t;
   uint64_t T[4];
@@ -495,7 +535,7 @@ __device__ void ModSub256(uint64_t *r,uint64_t *a,uint64_t *b) {
 
 // ---------------------------------------------------------------------------------------
 
-__device__ void ModSub256(uint64_t* r,uint64_t* b) {
+KW_EMUL_STATIC __device__ void ModSub256(uint64_t* r,uint64_t* b) {
 
   uint64_t t;
   uint64_t T[4];
@@ -519,7 +559,7 @@ __device__ void ModSub256(uint64_t* r,uint64_t* b) {
 
 // ---------------------------------------------------------------------------------------
 
-__device__ bool ModPositive256(uint64_t *r) {
+KW_EMUL_STATIC __device__ bool ModPositive256(uint64_t *r) {
 
   // Probability of failure (1/2^192)
   if(r[3] > 0x7FFFFFFFFFFFFFFFULL) {
@@ -532,7 +572,7 @@ __device__ bool ModPositive256(uint64_t *r) {
 
 }
 
-__device__ void ModNeg256Order(uint64_t* r) {
+KW_EMUL_STATIC __device__ void ModNeg256Order(uint64_t* r) {
 
   uint64_t t[4];
   USUBO(t[0],0ULL,r[0]);
@@ -548,6 +588,8 @@ __device__ void ModNeg256Order(uint64_t* r) {
 
 #endif
 
+#if KW_HAVE_PTX_ASM
+
 __device__ __forceinline__ uint32_t ctz(uint64_t x) {
   uint32_t n;
   asm("{\n\t"
@@ -559,11 +601,21 @@ __device__ __forceinline__ uint32_t ctz(uint64_t x) {
   return n;
 }
 
+#else
+
+// Count trailing zeros (emulation). The PTX version reverses and counts
+// leading zeros with a sentinel free trick; both return 64 for x == 0.
+KW_DEVICE_INLINE uint32_t ctz(uint64_t x) {
+  return (uint32_t)(x ? __builtin_ctzll(x) : 64);
+}
+
+#endif
+
 // ---------------------------------------------------------------------------------------
 #define SWAP(tmp,x,y) tmp = x; x = y; y = tmp;
 #define MSK62 0x3FFFFFFFFFFFFFFF
 
-__device__ void _DivStep62(uint64_t u[5],uint64_t v[5],
+KW_EMUL_STATIC __device__ void _DivStep62(uint64_t u[5],uint64_t v[5],
                            int32_t *pos,
                            int64_t* uu,int64_t* uv,
                            int64_t* vu,int64_t* vv) {
@@ -638,7 +690,7 @@ __device__ void _DivStep62(uint64_t u[5],uint64_t v[5],
 
 }
 
-__device__ void MatrixVecMulHalf(uint64_t dest[5],uint64_t u[5],uint64_t v[5],int64_t _11,int64_t _12,uint64_t* carry) {
+KW_EMUL_STATIC __device__ void MatrixVecMulHalf(uint64_t dest[5],uint64_t u[5],uint64_t v[5],int64_t _11,int64_t _12,uint64_t* carry) {
 
   uint64_t t1[NBBLOCK];
   uint64_t t2[NBBLOCK];
@@ -656,7 +708,7 @@ __device__ void MatrixVecMulHalf(uint64_t dest[5],uint64_t u[5],uint64_t v[5],in
 
 }
 
-__device__ void MatrixVecMul(uint64_t u[5],uint64_t v[5],int64_t _11,int64_t _12,int64_t _21,int64_t _22) {
+KW_EMUL_STATIC __device__ void MatrixVecMul(uint64_t u[5],uint64_t v[5],int64_t _11,int64_t _12,int64_t _21,int64_t _22) {
 
   uint64_t t1[NBBLOCK];
   uint64_t t2[NBBLOCK];
@@ -682,7 +734,7 @@ __device__ void MatrixVecMul(uint64_t u[5],uint64_t v[5],int64_t _11,int64_t _12
 
 }
 
-__device__ uint64_t AddCh(uint64_t r[5],uint64_t a[5],uint64_t carry) {
+KW_EMUL_STATIC __device__ uint64_t AddCh(uint64_t r[5],uint64_t a[5],uint64_t carry) {
 
   uint64_t carryOut;
 
@@ -697,7 +749,7 @@ __device__ uint64_t AddCh(uint64_t r[5],uint64_t a[5],uint64_t carry) {
 
 }
 
-__device__ __noinline__ void _ModInv(uint64_t *R) {
+KW_EMUL_STATIC __device__ __noinline__ void _ModInv(uint64_t *R) {
 
   // Compute modular inverse of R mop P (using 320bits signed integer)
   // 0 < this < P  , P must be odd
@@ -762,7 +814,6 @@ __device__ __noinline__ void _ModInv(uint64_t *R) {
     carryR = AddCh(tr,r0,carryR);
 
     if(_IsZero(v)) {
-
       ShiftR62(r,tr,carryR);
       break;
 
@@ -807,7 +858,7 @@ __device__ __noinline__ void _ModInv(uint64_t *R) {
 // a and b must be lower than n
 // ---------------------------------------------------------------------------------------
 
-__device__ void _ModMult(uint64_t *r,uint64_t *a,uint64_t *b) {
+KW_EMUL_STATIC __device__ void _ModMult(uint64_t *r,uint64_t *a,uint64_t *b) {
 
   uint64_t r512[8];
   uint64_t t[NBBLOCK];
@@ -858,7 +909,7 @@ __device__ void _ModMult(uint64_t *r,uint64_t *a,uint64_t *b) {
 }
 
 
-__device__ void _ModMult(uint64_t *r,uint64_t *a) {
+KW_EMUL_STATIC __device__ void _ModMult(uint64_t *r,uint64_t *a) {
 
   uint64_t r512[8];
   uint64_t t[NBBLOCK];
@@ -906,7 +957,7 @@ __device__ void _ModMult(uint64_t *r,uint64_t *a) {
 
 }
 
-__device__ void _ModSqr(uint64_t *rp,const uint64_t *up) {
+KW_EMUL_STATIC __device__ void _ModSqr(uint64_t *rp,const uint64_t *up) {
 
   uint64_t r512[8];
 
@@ -1163,7 +1214,7 @@ __device__ void _ModSqr(uint64_t *rp,const uint64_t *up) {
 // Compute all ModInv of the group
 // ---------------------------------------------------------------------------------------
 
-__device__ __noinline__ void _ModInvGrouped(uint64_t r[GPU_GRP_SIZE][4]) {
+KW_EMUL_STATIC __device__ __noinline__ void _ModInvGrouped(uint64_t r[GPU_GRP_SIZE][4]) {
 
   uint64_t subp[GPU_GRP_SIZE][4];
   uint64_t newValue[4];

@@ -26,6 +26,9 @@
 
 using namespace std;
 
+// GPU search modes (GPUModes.cpp): xpoint scan and BSGS
+int gpuModeMain(int argc, char **argv, Secp256K1 *secp);
+
 #define CHECKARG(opt,n) if(a>=argc-1) {::printf(opt " missing argument #%d\n",n);exit(0);} else {a++;}
 
 // ------------------------------------------------------------------------------------------
@@ -61,6 +64,7 @@ void printUsage() {
   printf(" -o fileName: output result to fileName\n");
   printf(" -l: List cuda enabled devices\n");
   printf(" -check: Check GPU kernel vs CPU\n");
+  printf(" --mode xpoint|bsgs: GPU search mode (see --help after --mode)\n");
   printf(" inFile: intput configuration file\n");
   exit(0);
 
@@ -179,6 +183,11 @@ int main(int argc, char* argv[]) {
   // Init SecpK1
   Secp256K1 *secp = new Secp256K1();
   secp->Init();
+
+  // GPU search modes: --mode xpoint|bsgs ... (see GPUModes.cpp)
+  for (int i = 1; i < argc; i++)
+    if (strcmp(argv[i], "--mode") == 0)
+      return gpuModeMain(argc, argv, secp);
 
   int a = 1;
   nbCPUThread = Timer::getCoreNumber();

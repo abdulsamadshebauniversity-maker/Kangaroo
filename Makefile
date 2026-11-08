@@ -8,8 +8,9 @@ ifdef gpu
 SRC = SECPK1/IntGroup.cpp main.cpp SECPK1/Random.cpp \
       Timer.cpp SECPK1/Int.cpp SECPK1/IntMod.cpp \
       SECPK1/Point.cpp SECPK1/SECP256K1.cpp \
-      GPU/GPUEngine.o Kangaroo.cpp HashTable.cpp \
-      Backup.cpp Thread.cpp Check.cpp Network.cpp Merge.cpp PartMerge.cpp
+      GPU/GPUEngine.o GPU/GPUXPoint.o GPU/GPUBsgs.o \
+      Kangaroo.cpp HashTable.cpp GPUModes.cpp Backup.cpp Thread.cpp Check.cpp \
+      Network.cpp Merge.cpp PartMerge.cpp
 
 OBJDIR = obj
 
@@ -17,15 +18,16 @@ OBJET = $(addprefix $(OBJDIR)/, \
       SECPK1/IntGroup.o main.o SECPK1/Random.o \
       Timer.o SECPK1/Int.o SECPK1/IntMod.o \
       SECPK1/Point.o SECPK1/SECP256K1.o \
-      GPU/GPUEngine.o Kangaroo.o HashTable.o Thread.o \
-      Backup.o Check.o Network.o Merge.o PartMerge.o)
+      GPU/GPUEngine.o GPU/GPUXPoint.o GPU/GPUBsgs.o \
+      Kangaroo.o HashTable.o GPUModes.o Backup.o Check.o Network.o Merge.o \
+      PartMerge.o)
 
 else
 
 SRC = SECPK1/IntGroup.cpp main.cpp SECPK1/Random.cpp \
       Timer.cpp SECPK1/Int.cpp SECPK1/IntMod.cpp \
       SECPK1/Point.cpp SECPK1/SECP256K1.cpp \
-      Kangaroo.cpp HashTable.cpp Thread.cpp Check.cpp \
+      Kangaroo.cpp HashTable.cpp GPUModes.cpp Thread.cpp Check.cpp \
       Backup.cpp Network.cpp Merge.cpp PartMerge.cpp
 
 OBJDIR = obj
@@ -34,31 +36,42 @@ OBJET = $(addprefix $(OBJDIR)/, \
       SECPK1/IntGroup.o main.o SECPK1/Random.o \
       Timer.o SECPK1/Int.o SECPK1/IntMod.o \
       SECPK1/Point.o SECPK1/SECP256K1.o \
-      Kangaroo.o HashTable.o Thread.o Check.o Backup.o \
+      Kangaroo.o HashTable.o GPUModes.o Thread.o Check.o Backup.o \
       Network.o Merge.o PartMerge.o)
 
 endif
 
 CXX        = g++
-CUDA       = /usr/local/cuda-8.0
-CXXCUDA    = /usr/bin/g++-4.8
-NVCC       = $(CUDA)/bin/nvcc
+# Toolchain is autodetected ($(CUDA) and $(CXXCUDA) can be overridden on the
+# command line). The old hardcoded cuda-8.0 / g++-4.8 pair does not exist on
+# current distributions and cannot compile the C++11 headers of the project.
+# Only set CUDA when it can be found: an empty $(CUDA) must not become /include.
+CUDA      ?= $(shell if [ -d /usr/local/cuda ]; then echo /usr/local/cuda; \
+              elif [ -n "$$CUDA_HOME" ]; then echo $$CUDA_HOME; \
+              elif command -v nvcc >/dev/null 2>&1; then \
+                dirname $$(dirname $$(command -v nvcc)); fi)
+NVCC      ?= $(if $(CUDA),$(CUDA)/bin/nvcc,nvcc)
+CXXCUDA   ?= $(CXX)
+# GPU compute capability for -gencode (default 61 = Pascal, override with
+# "make gpu=1 ccap=86"). Use 'ccap' in rules: make variables are case sensitive
+# and the old file mixed both spellings.
+ccap      ?= 61
 
 ifdef gpu
 
 ifdef debug
-CXXFLAGS   = -DWITHGPU -m64  -mssse3 -Wno-unused-result -Wno-write-strings -g -I. -I$(CUDA)/include
+CXXFLAGS   = -DWITHGPU -m64  -mssse3 -Wno-unused-result -Wno-write-strings -g -I. $(if $(CUDA),-I$(CUDA)/include)
 else
-CXXFLAGS   = -DWITHGPU -m64 -mssse3 -Wno-unused-result -Wno-write-strings -O2 -I. -I$(CUDA)/include
+CXXFLAGS   = -DWITHGPU -m64 -mssse3 -Wno-unused-result -Wno-write-strings -O2 -I. $(if $(CUDA),-I$(CUDA)/include)
 endif
-LFLAGS     = -lpthread -L$(CUDA)/lib64 -lcudart
+LFLAGS     = -lpthread $(if $(CUDA),-L$(CUDA)/lib64) -lcudart
 
 else
 
 ifdef debug
-CXXFLAGS   = -m64 -mssse3 -Wno-unused-result -Wno-write-strings -g -I. -I$(CUDA)/include
+CXXFLAGS   = -m64 -mssse3 -Wno-unused-result -Wno-write-strings -g -I. $(if $(CUDA),-I$(CUDA)/include)
 else
-CXXFLAGS   =  -m64 -mssse3 -Wno-unused-result -Wno-write-strings -O2 -I. -I$(CUDA)/include
+CXXFLAGS   =  -m64 -mssse3 -Wno-unused-result -Wno-write-strings -O2 -I. $(if $(CUDA),-I$(CUDA)/include)
 endif
 LFLAGS     = -lpthread
 
@@ -68,21 +81,45 @@ endif
 
 ifdef gpu
 ifdef debug
-$(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu
-	$(NVCC) -G -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC -ccbin $(CXXCUDA) -m64 -g -I$(CUDA)/include -gencode=arch=compute_$(ccap),code=sm_$(ccap) -o $(OBJDIR)/GPU/GPUEngine.o -c GPU/GPUEngine.cu
+$(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu | $(OBJDIR)/GPU
+	$(NVCC) -G -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC -ccbin $(CXXCUDA) -m64 -g $(if $(CUDA),-I$(CUDA)/include) -gencode=arch=compute_$(ccap),code=sm_$(ccap) -o $(OBJDIR)/GPU/GPUEngine.o -c GPU/GPUEngine.cu
 else
-$(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu
-	$(NVCC) -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC -ccbin $(CXXCUDA) -m64 -O2 -I$(CUDA)/include -gencode=arch=compute_$(ccap),code=sm_$(ccap) -o $(OBJDIR)/GPU/GPUEngine.o -c GPU/GPUEngine.cu
+$(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu | $(OBJDIR)/GPU
+	$(NVCC) -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC -ccbin $(CXXCUDA) -m64 -O2 $(if $(CUDA),-I$(CUDA)/include) -gencode=arch=compute_$(ccap),code=sm_$(ccap) -o $(OBJDIR)/GPU/GPUEngine.o -c GPU/GPUEngine.cu
 endif
 endif
+
+# The xpoint/BSGS host drivers include the kernel headers, so they are nvcc
+# units too: the kernels must be visible to the compiler that launches them.
+# A GPU build therefore needs the CUDA toolkit; without one the modes are still
+# available through the emulator ("make emu" builds a CPU-only binary).
+NVCCFLAGS  = -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC \
+             -ccbin $(CXXCUDA) -m64 -O2 -I. $(if $(CUDA),-I$(CUDA)/include) \
+             -gencode=arch=compute_$(ccap),code=sm_$(ccap)
+
+$(OBJDIR)/GPU/GPUXPoint.o: GPU/GPUXPoint.cpp GPU/GPUXPoint.h GPU/GPUXPointKernel.h \
+                           GPU/GPUPointWalk.h GPU/GPULaunch.h | $(OBJDIR)/GPU
+	$(NVCC) $(NVCCFLAGS) -o $(OBJDIR)/GPU/GPUXPoint.o -c GPU/GPUXPoint.cpp
+
+$(OBJDIR)/GPU/GPUBsgs.o: GPU/GPUBsgs.cpp GPU/GPUBsgs.h GPU/GPUBsgsKernel.h \
+                         GPU/GPUPointWalk.h GPU/GPULaunch.h | $(OBJDIR)/GPU
+	$(NVCC) $(NVCCFLAGS) -o $(OBJDIR)/GPU/GPUBsgs.o -c GPU/GPUBsgs.cpp
 
 $(OBJDIR)/%.o : %.cpp
 	$(CXX) $(CXXFLAGS) -o $@ -c $<
 
+# CPU-only binary: the GPU search kernels run through the SIMT emulator.
+EMUDIR = obj/emu
+EMUSRC = SECPK1/IntGroup.cpp SECPK1/Int.cpp SECPK1/IntMod.cpp SECPK1/Point.cpp \
+         SECPK1/SECP256K1.cpp SECPK1/Random.cpp Timer.cpp GPU/GPUBsgs.cpp \
+         GPU/GPUXPoint.cpp GPUModes.cpp main.cpp Kangaroo.cpp HashTable.cpp \
+         Thread.cpp Backup.cpp Check.cpp Network.cpp Merge.cpp PartMerge.cpp
+EMUOBJ = $(addprefix $(EMUDIR)/,$(notdir $(EMUSRC:.cpp=.o)))
+
 all: bsgs
 
 bsgs: $(OBJET)
-	@echo Making Kangaroo...
+	@echo "Making Kangaroo..."
 	$(CXX) $(OBJET) $(LFLAGS) -o kangaroo
 
 $(OBJET): | $(OBJDIR) $(OBJDIR)/SECPK1 $(OBJDIR)/GPU
@@ -96,9 +133,95 @@ $(OBJDIR)/GPU: $(OBJDIR)
 $(OBJDIR)/SECPK1: $(OBJDIR)
 	cd $(OBJDIR) &&	mkdir -p SECPK1
 
+emu: $(EMUOBJ)
+	@echo "Making Kangaroo (CPU emulation of the GPU kernels)..."
+	$(CXX) $(TESTFLAGS) $(EMUOBJ) -lpthread -o kangaroo-emu
+
+$(EMUDIR)/%.o: %.cpp
+	@mkdir -p $(EMUDIR)
+	$(CXX) $(TESTFLAGS) -c -o $@ $<
+
+$(EMUDIR)/%.o: SECPK1/%.cpp
+	@mkdir -p $(EMUDIR)
+	$(CXX) $(TESTFLAGS) -c -o $@ $<
+
+$(EMUDIR)/%.o: GPU/%.cpp
+	@mkdir -p $(EMUDIR)
+	$(CXX) $(TESTFLAGS) -c -o $@ $<
+
 clean:
-	@echo Cleaning...
+	@echo "Cleaning..."
 	@rm -f obj/*.o
 	@rm -f obj/GPU/*.o
 	@rm -f obj/SECPK1/*.o
 
+
+#---------------------------------------------------------------------
+# CPU-side test build of the GPU device code (no GPU required)
+#
+#   make check-arithmetic
+#
+# Compiles GPU/GPUMath.h through the SIMT emulation layer of
+# GPU/GPUCompat.h (-DKW_EMULATE) and validates every 256 bit primitive
+# against the independent fixed size CPU implementation in SECPK1/.
+#---------------------------------------------------------------------
+
+TESTDIR   = obj/test
+TESTCORE  = SECPK1/Int.cpp SECPK1/IntMod.cpp SECPK1/IntGroup.cpp \
+            SECPK1/SECP256K1.cpp SECPK1/Point.cpp SECPK1/Random.cpp Timer.cpp
+TESTFLAGS = -O2 -m64 -mssse3 -DKW_EMULATE -Wno-write-strings -I.
+
+check-pointwalk: $(TESTDIR)/test_pointwalk
+	@echo "Running GPU group walk tests..."
+	@$(TESTDIR)/test_pointwalk 5
+
+$(TESTDIR)/test_pointwalk: tests/test_pointwalk.cpp GPU/GPUPointWalk.h GPU/GPUMath.h GPU/GPUCompat.h $(TESTCORE)
+	@mkdir -p $(TESTDIR)
+	$(CXX) $(TESTFLAGS) -o $@ tests/test_pointwalk.cpp $(TESTCORE)
+
+check-bsgs: $(TESTDIR)/test_bsgs
+	@echo "Running GPU BSGS engine tests..."
+	@$(TESTDIR)/test_bsgs
+
+$(TESTDIR)/test_bsgs: tests/test_bsgs.cpp GPU/GPUBsgs.cpp GPU/GPUBsgs.h GPU/GPUBsgsKernel.h GPU/GPUPointWalk.h $(TESTCORE)
+	@mkdir -p $(TESTDIR)
+	$(CXX) $(TESTFLAGS) -o $@ tests/test_bsgs.cpp GPU/GPUBsgs.cpp $(TESTCORE)
+
+check-xpoint: $(TESTDIR)/test_xpoint
+	@echo "Running GPU xpoint kernel tests..."
+	@$(TESTDIR)/test_xpoint
+
+$(TESTDIR)/test_xpoint: tests/test_xpoint.cpp GPU/GPUXPoint.cpp GPU/GPUXPoint.h GPU/GPUXPointKernel.h GPU/GPUPointWalk.h $(TESTCORE)
+	@mkdir -p $(TESTDIR)
+	$(CXX) $(TESTFLAGS) -o $@ tests/test_xpoint.cpp GPU/GPUXPoint.cpp $(TESTCORE)
+
+bench: $(TESTDIR)/bench_gpu
+	@$(TESTDIR)/bench_gpu
+
+$(TESTDIR)/bench_gpu: tests/bench_gpu.cpp GPU/GPUBsgs.cpp GPU/GPUXPoint.cpp GPU/GPUBsgs.h GPU/GPUXPoint.h $(TESTCORE)
+	@mkdir -p $(TESTDIR)
+	$(CXX) $(TESTFLAGS) -o $@ tests/bench_gpu.cpp GPU/GPUBsgs.cpp GPU/GPUXPoint.cpp $(TESTCORE)
+
+# End to end smoke test of the command line front end (see GPUModes.cpp).
+# Key 0x12D687 must be found by both modes; the x is the reference one.
+KW_TEST_X = 8208F5ABF04066BAD1DB9D46F8BCF5A6CC11D0558AB523E7BD3C0EC08BDB782F
+KW_TEST_PUB = 048208F5ABF04066BAD1DB9D46F8BCF5A6CC11D0558AB523E7BD3C0EC08BDB782FB7A0AC7E4A033B943B42175CA60CB78F65BDACE71333FF53E12E50900800D4DA
+
+check-cli: emu
+	@echo "Running command line (xpoint/bsgs) tests..."
+	@./kangaroo-emu --mode xpoint --start 0x120000 --range 200000 --x $(KW_TEST_X) --quiet \
+	  | grep -q "^key=12D687 x=$(KW_TEST_X)$$" \
+	  && echo "  xpoint: key 0x12D687 found" || (echo "  xpoint: FAILED"; exit 1)
+	@./kangaroo-emu --mode bsgs --start 0x120000 --range 200000 --pubkey $(KW_TEST_PUB) --m 4096 --quiet \
+	  | grep -q "^key=12D687 x=$(KW_TEST_X)$$" \
+	  && echo "  bsgs: key 0x12D687 found" || (echo "  bsgs: FAILED"; exit 1)
+
+check: check-arithmetic check-pointwalk check-xpoint check-bsgs check-cli
+
+check-arithmetic: $(TESTDIR)/test_gpumath
+	@echo "Running device arithmetic tests..."
+	@$(TESTDIR)/test_gpumath 64
+
+$(TESTDIR)/test_gpumath: tests/test_gpumath.cpp GPU/GPUMath.h GPU/GPUCompat.h $(TESTCORE)
+	@mkdir -p $(TESTDIR)
+	$(CXX) $(TESTFLAGS) -o $@ tests/test_gpumath.cpp $(TESTCORE)
