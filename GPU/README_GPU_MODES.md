@@ -108,6 +108,12 @@ Result buffer: `[0]` = atomic match count, then `KW_MATCH_U32 = 11` words per
 match (absolute key, x, fingerprint). Only the counter and the matches are read
 back.
 
+The batch of 64 x coordinates lives in **shared memory** (2 KB per block) and
+not in registers: 512 bytes of registers per thread is what limits occupancy on
+a real card, and the scan only consumes the values one at a time. The BSGS
+kernels use the same primitive with a per-thread buffer of `m` keys, where `m`
+is chosen large enough to amortise the baby walk over the giants.
+
 ### 2.4 BSGS kernels
 
 ```
@@ -308,6 +314,7 @@ host before reporting it.
       host verification)
 * [x] build integration (`GPU/GPULaunch.cu`, Makefile autodetection)
 * [x] tests and benchmark in `make check` / `make bench`
+* [x] occupancy: xpoint group buffer moved to shared memory (2 KB/block)
 * [ ] run `make gpu=1 ccap=XX` and the benchmark on a real CUDA device
 * [ ] add a command line front end (`--mode xpoint` / `--mode bsgs`) to
       `main.cpp` so the modes are usable from the binary

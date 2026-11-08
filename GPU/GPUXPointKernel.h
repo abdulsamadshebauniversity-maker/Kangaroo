@@ -73,9 +73,12 @@ KW_EMUL_STATIC __global__ void kwXPointKernel(uint64_t *kangaroos,
                                KWScanParams p,
                                uint64_t *cursor) {
 
-  // Per thread: group centre, generated x, target fingerprints
+  // Per thread: group centre, generated x, target fingerprints.
+  // The group of x coordinates is kept in shared memory: 64*32 = 2 KB per
+  // block instead of 2 KB of registers per thread, which keeps the occupancy
+  // of the scan at a usable level (the walk only needs the values one by one).
+  __shared__ uint64_t shXs[KW_GROUP][4];
   uint64_t cx[4], cy[4];
-  uint64_t xs[KW_GROUP][4];
   uint64_t fp[KW_MAX_TARGETS];
 
   const uint64_t *gx = gTable;
@@ -101,11 +104,11 @@ KW_EMUL_STATIC __global__ void kwXPointKernel(uint64_t *kangaroos,
 
     uint64_t keyBase = p.rangeStart + g * KW_GROUP;     // key of xs[0]
 
-    kwWalkGroup(xs, cx, cy, cx, cy, gx, gy, nx, ny);
+    kwWalkGroup(shXs, cx, cy, cx, cy, gx, gy, nx, ny);
 
     #pragma unroll 1
     for (int i = 0; i < KW_GROUP; i++) {
-      uint64_t h = kwFingerprint(xs[i]);
+      uint64_t h = kwFingerprint(shXs[i]);
       for (uint32_t t = 0; t < p.nbTarget; t++) {
         if (h == fp[t]) {
           uint32_t pos = atomicAdd(results, 1u);
@@ -114,10 +117,10 @@ KW_EMUL_STATIC __global__ void kwXPointKernel(uint64_t *kangaroos,
             uint64_t keyIdx = keyBase + (uint64_t)i;
             e[0] = (uint32_t)(keyIdx & 0xFFFFFFFFULL);
             e[1] = (uint32_t)(keyIdx >> 32);
-            e[2] = (uint32_t)xs[i][0]; e[3] = (uint32_t)(xs[i][0] >> 32);
-            e[4] = (uint32_t)xs[i][1]; e[5] = (uint32_t)(xs[i][1] >> 32);
-            e[6] = (uint32_t)xs[i][2]; e[7] = (uint32_t)(xs[i][2] >> 32);
-            e[8] = (uint32_t)xs[i][3]; e[9] = (uint32_t)(xs[i][3] >> 32);
+            e[2] = (uint32_t)shXs[i][0]; e[3] = (uint32_t)(shXs[i][0] >> 32);
+            e[4] = (uint32_t)shXs[i][1]; e[5] = (uint32_t)(shXs[i][1] >> 32);
+            e[6] = (uint32_t)shXs[i][2]; e[7] = (uint32_t)(shXs[i][2] >> 32);
+            e[8] = (uint32_t)shXs[i][3]; e[9] = (uint32_t)(shXs[i][3] >> 32);
             e[10] = (uint32_t)(h & 0xFFFFFFFFULL);
           }
           break;
