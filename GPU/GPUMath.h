@@ -23,6 +23,34 @@
 #define NBBLOCK 5
 #define BIFULLSIZE 40
 
+// ---------------------------------------------------------------------------------
+
+#include "GPUCompat.h"
+#include "../Constants.h"
+
+// Number of 64 bits words stored per kangaroo in GPU memory
+// (x[4] y[4] dist[2] and lastJump when symmetry is enabled)
+#ifndef KSIZE
+#ifdef USE_SYMMETRY
+#define KSIZE 11
+#else
+#define KSIZE 10
+#endif
+#endif
+
+// Assembly directives
+//
+// When compiled by nvcc with the PTX backend (KW_HAVE_PTX_ASM==1) these are the
+// original inline PTX primitives: the 64x64->128 bit operations of the whole
+// library go through the hardware carry flag, which is what makes the LSU
+// pipelines of the 256 bit arithmetic so dense.
+//
+// When compiled by a host compiler (KW_EMULATE==1) GPUCompat.h provides bit
+// exact emulations of the very same macros, so this file and everything built
+// on it can be unit tested without a GPU.
+
+#if KW_HAVE_PTX_ASM
+
 // Assembly directives
 #define UADDO(c, a, b) asm volatile ("add.cc.u64 %0, %1, %2;" : "=l"(c) : "l"(a), "l"(b) : "memory" );
 #define UADDC(c, a, b) asm volatile ("addc.cc.u64 %0, %1, %2;" : "=l"(c) : "l"(a), "l"(b) : "memory" );
@@ -46,6 +74,8 @@
 #define MADDC(r,a,b,c) asm volatile ("madc.hi.cc.u64 %0, %1, %2, %3;" : "=l"(r) : "l"(a), "l"(b), "l"(c) : "memory" );
 #define MADD(r,a,b,c) asm volatile ("madc.hi.u64 %0, %1, %2, %3;" : "=l"(r) : "l"(a), "l"(b), "l"(c));
 #define MADDS(r,a,b,c) asm volatile ("madc.hi.s64 %0, %1, %2, %3;" : "=l"(r) : "l"(a), "l"(b), "l"(c));
+
+#endif // KW_HAVE_PTX_ASM
 
 // Jump distance
 __device__ __constant__ uint64_t jD[NB_JUMP][2];
@@ -548,6 +578,8 @@ __device__ void ModNeg256Order(uint64_t* r) {
 
 #endif
 
+#if KW_HAVE_PTX_ASM
+
 __device__ __forceinline__ uint32_t ctz(uint64_t x) {
   uint32_t n;
   asm("{\n\t"
@@ -558,6 +590,16 @@ __device__ __forceinline__ uint32_t ctz(uint64_t x) {
     : "=r"(n) : "l"(x));
   return n;
 }
+
+#else
+
+// Count trailing zeros (emulation). The PTX version reverses and counts
+// leading zeros with a sentinel free trick; both return 64 for x == 0.
+KW_DEVICE_INLINE uint32_t ctz(uint64_t x) {
+  return (uint32_t)(x ? __builtin_ctzll(x) : 64);
+}
+
+#endif
 
 // ---------------------------------------------------------------------------------------
 #define SWAP(tmp,x,y) tmp = x; x = y; y = tmp;
@@ -762,7 +804,6 @@ __device__ __noinline__ void _ModInv(uint64_t *R) {
     carryR = AddCh(tr,r0,carryR);
 
     if(_IsZero(v)) {
-
       ShiftR62(r,tr,carryR);
       break;
 

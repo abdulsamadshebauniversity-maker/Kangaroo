@@ -102,3 +102,26 @@ clean:
 	@rm -f obj/GPU/*.o
 	@rm -f obj/SECPK1/*.o
 
+
+#---------------------------------------------------------------------
+# CPU-side test build of the GPU device code (no GPU required)
+#
+#   make check-arithmetic
+#
+# Compiles GPU/GPUMath.h through the SIMT emulation layer of
+# GPU/GPUCompat.h (-DKW_EMULATE) and validates every 256 bit primitive
+# against the independent fixed size CPU implementation in SECPK1/.
+#---------------------------------------------------------------------
+
+TESTDIR   = obj/test
+TESTCORE  = SECPK1/Int.cpp SECPK1/IntMod.cpp SECPK1/IntGroup.cpp \
+            SECPK1/SECP256K1.cpp SECPK1/Point.cpp SECPK1/Random.cpp Timer.cpp
+TESTFLAGS = -O2 -m64 -mssse3 -DKW_EMULATE -Wno-write-strings -I.
+
+check-arithmetic: $(TESTDIR)/test_gpumath
+	@echo "Running device arithmetic tests..."
+	@$(TESTDIR)/test_gpumath 64
+
+$(TESTDIR)/test_gpumath: tests/test_gpumath.cpp GPU/GPUMath.h GPU/GPUCompat.h $(TESTCORE)
+	@mkdir -p $(TESTDIR)
+	$(CXX) $(TESTFLAGS) -o $@ tests/test_gpumath.cpp $(TESTCORE)
