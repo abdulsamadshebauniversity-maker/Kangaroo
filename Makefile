@@ -126,7 +126,15 @@ $(TESTDIR)/test_pointwalk: tests/test_pointwalk.cpp GPU/GPUPointWalk.h GPU/GPUMa
 	@mkdir -p $(TESTDIR)
 	$(CXX) $(TESTFLAGS) -o $@ tests/test_pointwalk.cpp $(TESTCORE)
 
-check: check-arithmetic check-pointwalk
+check-xpoint: $(TESTDIR)/test_xpoint
+	@echo "Running GPU xpoint kernel tests..."
+	@$(TESTDIR)/test_xpoint
+
+$(TESTDIR)/test_xpoint: tests/test_xpoint.cpp GPU/GPUXPointKernel.h GPU/GPUPointWalk.h $(TESTCORE)
+	@mkdir -p $(TESTDIR)
+	$(CXX) $(TESTFLAGS) -o $@ tests/test_xpoint.cpp $(TESTCORE)
+
+check: check-arithmetic check-pointwalk check-xpoint
 
 check-arithmetic: $(TESTDIR)/test_gpumath
 	@echo "Running device arithmetic tests..."

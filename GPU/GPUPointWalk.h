@@ -136,7 +136,10 @@ __device__ bool kwAddPoint(uint64_t *rx, uint64_t *ry,
                            uint64_t *qx, uint64_t *qy,
                            uint64_t *inv) {
 
+  // rx/ry may alias px/py or qx/qy: all the results are accumulated in
+  // temporaries and stored at the very end.
   uint64_t dx[4], dy[4], s[4], s2[4], t[4], z[4];
+  uint64_t lx[4], ly[4];
 
   ModSub256(dx, qx, px);
   ModSub256(dy, qy, py);
@@ -160,11 +163,14 @@ __device__ bool kwAddPoint(uint64_t *rx, uint64_t *ry,
   }
 
   _ModSqr(s2, s);
-  ModSub256(rx, s2, px);
-  ModSub256(rx, rx, qx);                  // rx = s^2 - px - qx
-  ModSub256(t, px, rx);
-  _ModMult(ry, s, t);
-  ModSub256(ry, ry, py);                  // ry = s(px - rx) - py
+  ModSub256(lx, s2, px);
+  ModSub256(lx, lx, qx);                  // lx = s^2 - px - qx
+  ModSub256(t, px, lx);                   // t  = px - lx
+  _ModMult(ly, s, t);
+  ModSub256(ly, ly, py);                  // ly = s(px - lx) - py
+
+  Load256(rx, lx);
+  Load256(ry, ly);
 
   return true;
 
