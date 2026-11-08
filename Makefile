@@ -49,8 +49,9 @@ CUDA      ?= $(shell if [ -d /usr/local/cuda ]; then echo /usr/local/cuda; \
               else dirname $$(dirname $$(which nvcc 2>/dev/null)) 2>/dev/null; fi)
 NVCC      ?= $(if $(CUDA),$(CUDA)/bin/nvcc,/usr/bin/nvcc)
 CXXCUDA   ?= $(CXX)
-CCAP      ?= $(shell $(NVCC) --list-gpus 2>/dev/null | head -1 | \
-              sed -e 's/.*sm_//' -e 's/).*//' 2>/dev/null)
+# GPU compute capability for -gencode (default 61 = Pascal, override with
+# "make gpu=1 ccap=86"). Use 'ccap' in rules: make variables are case sensitive
+# and the old file mixed both spellings.
 ccap      ?= 61
 
 ifdef gpu
@@ -77,19 +78,18 @@ endif
 
 ifdef gpu
 ifdef debug
-$(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu
+$(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu | $(OBJDIR)/GPU
 	$(NVCC) -G -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC -ccbin $(CXXCUDA) -m64 -g -I$(CUDA)/include -gencode=arch=compute_$(ccap),code=sm_$(ccap) -o $(OBJDIR)/GPU/GPUEngine.o -c GPU/GPUEngine.cu
 else
-$(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu
+$(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu | $(OBJDIR)/GPU
 	$(NVCC) -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC -ccbin $(CXXCUDA) -m64 -O2 -I$(CUDA)/include -gencode=arch=compute_$(ccap),code=sm_$(ccap) -o $(OBJDIR)/GPU/GPUEngine.o -c GPU/GPUEngine.cu
 endif
 endif
 
-GPU/GPULaunch.o: GPU/GPULaunch.cu GPU/GPULaunch.h GPU/GPUXPointKernel.h GPU/GPUBsgsKernel.h
+$(OBJDIR)/GPU/GPULaunch.o: GPU/GPULaunch.cu GPU/GPULaunch.h GPU/GPUXPointKernel.h GPU/GPUBsgsKernel.h | $(OBJDIR)/GPU
 	$(NVCC) -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC \
 	  -ccbin $(CXXCUDA) -m64 -O2 -I$(CUDA)/include -I. \
-	  -gencode=arch=compute_$(ccap),code=sm_$(ccap) -o GPU/GPULaunch.o -c GPU/GPULaunch.cu
-	mv GPU/GPULaunch.o $(OBJDIR)/GPU/GPULaunch.o
+	  -gencode=arch=compute_$(ccap),code=sm_$(ccap) -o $(OBJDIR)/GPU/GPULaunch.o -c GPU/GPULaunch.cu
 
 $(OBJDIR)/%.o : %.cpp
 	$(CXX) $(CXXFLAGS) -o $@ -c $<
