@@ -57,11 +57,37 @@
 #define KW_NDX    (KW_HALF + 1)
 
 // ---------------------------------------------------------------------------------
+// 64 bit fingerprint of a 256 bit value.
+//
+// xpoint search and BSGS both compare 32 byte x coordinates; instead of moving
+// them back to the host they are reduced to 64 bits on the device with a fast
+// mixer (identical on host and device, see tests). A 64 bit fingerprint is
+// wide enough: a false positive needs a 64 bit collision and is always
+// re-verified on the host with a full scalar multiplication.
+// ---------------------------------------------------------------------------------
+
+KW_HOST_DEVICE uint64_t kwMixStep(uint64_t x) {
+  x ^= x >> 30; x *= 0xBF58476D1CE4E5B9ULL;
+  x ^= x >> 27; x *= 0x94D049BB133111EBULL;
+  x ^= x >> 31;
+  return x;
+}
+
+KW_HOST_DEVICE uint64_t kwFingerprint(const uint64_t *x) {
+  uint64_t h = 0x9E3779B97F4A7C15ULL;
+  h = kwMixStep(h ^ x[0]);
+  h = kwMixStep(h ^ x[1]);
+  h = kwMixStep(h ^ x[2]);
+  h = kwMixStep(h ^ x[3]);
+  return h;
+}
+
+// ---------------------------------------------------------------------------------
 // Field primitives
 // ---------------------------------------------------------------------------------
 
 // y^2 == x^3 + 7 (mod P)
-__device__ bool kwOnCurve(uint64_t *x, uint64_t *y) {
+KW_EMUL_STATIC __device__ bool kwOnCurve(uint64_t *x, uint64_t *y) {
 
   uint64_t x2[4], x3[4], y2[4], seven[4], t[4];
 
@@ -79,7 +105,7 @@ __device__ bool kwOnCurve(uint64_t *x, uint64_t *y) {
 // Modular inversion of a single 4 limb value.
 // _ModInv() works on 5 limbs (320 bit signed), so a zeroed 5th limb is
 // mandatory: passing a 4 limb array directly would read a garbage carry limb.
-__device__ void kwInv(uint64_t r[4], uint64_t *a) {
+KW_EMUL_STATIC __device__ void kwInv(uint64_t r[4], uint64_t *a) {
   uint64_t t[5];
   Load256(t, a);
   t[4] = 0;
@@ -90,7 +116,7 @@ __device__ void kwInv(uint64_t r[4], uint64_t *a) {
 // Modular inversion of n values with a single inversion.
 // v[i] is replaced by v[i]^-1 (mod P). n must be a compile time constant.
 template <int N>
-__device__ void kwGroupInv(uint64_t v[N][4]) {
+KW_EMUL_STATIC __device__ void kwGroupInv(uint64_t v[N][4]) {
 
   uint64_t sub[N][4];
 
@@ -114,7 +140,7 @@ __device__ void kwGroupInv(uint64_t v[N][4]) {
 }
 
 // rx = x(P + Q), given inv = (Q.x - P.x)^-1
-__device__ void kwAddX(uint64_t *rx, uint64_t *px, uint64_t *py,
+KW_EMUL_STATIC __device__ void kwAddX(uint64_t *rx, uint64_t *px, uint64_t *py,
                        uint64_t *qx, uint64_t *qy, uint64_t *inv) {
 
   uint64_t dy[4], s[4], s2[4];
@@ -131,7 +157,7 @@ __device__ void kwAddX(uint64_t *rx, uint64_t *px, uint64_t *py,
 // Returns false when the result is the point at infinity (P == -Q).
 // Doubling (P == Q) is handled. Costs one inversion, only used once per
 // group to move the centre by KW_GROUP*G.
-__device__ bool kwAddPoint(uint64_t *rx, uint64_t *ry,
+KW_EMUL_STATIC __device__ bool kwAddPoint(uint64_t *rx, uint64_t *ry,
                            uint64_t *px, uint64_t *py,
                            uint64_t *qx, uint64_t *qy,
                            uint64_t *inv) {
@@ -190,11 +216,16 @@ __device__ bool kwAddPoint(uint64_t *rx, uint64_t *ry,
 //   xs[i] = x(centre + (i - KW_HALF)*G)
 // so xs[KW_HALF] is the centre itself.
 // ---------------------------------------------------------------------------------
-__device__ void kwWalkGroup(uint64_t xs[KW_GROUP][4],
-                            uint64_t *ncx, uint64_t *ncy,
-                            uint64_t *cx, uint64_t *cy,
-                            const uint64_t *gx, const uint64_t *gy,
-                            const uint64_t *nx, const uint64_t *ny) {
+// sign = +1 : the walk enumerates centre + (i - KW_HALF)*G  and the centre
+//             advances by +KW_GROUP*G
+// sign = -1 : the walk enumerates centre - (i - KW_HALF)*G  and the centre
+//             advances by -KW_GROUP*G (the giant steps of BSGS go backwards)
+KW_EMUL_STATIC __device__ void kwWalkGroupSigned(uint64_t xs[KW_GROUP][4],
+                                  uint64_t *ncx, uint64_t *ncy,
+                                  uint64_t *cx, uint64_t *cy,
+                                  const uint64_t *gx, const uint64_t *gy,
+                                  const uint64_t *nx, const uint64_t *ny,
+                                  int sign) {
 
   uint64_t dx[KW_NDX][4];
   uint64_t gxv[KW_HALF][4];
@@ -204,12 +235,17 @@ __device__ void kwWalkGroup(uint64_t xs[KW_GROUP][4],
   for (int t = 1; t <= KW_HALF; t++) {
     Load256(gxv[t - 1], (uint64_t *)(gx + (t - 1) * 4));
     Load256(gyv[t - 1], (uint64_t *)(gy + (t - 1) * 4));
+    if (sign < 0)
+      ModNeg256(gyv[t - 1]);
     ModSub256(dx[t - 1], gxv[t - 1], cx);
   }
   // last entry: dx for the KW_GROUP*G step used for the next centre
+  uint64_t nX[4], nY[4];
   {
-    uint64_t nX[4];
     Load256(nX, (uint64_t *)nx);
+    Load256(nY, (uint64_t *)ny);
+    if (sign < 0)
+      ModNeg256(nY);
     ModSub256(dx[KW_HALF], nX, cx);
   }
 
@@ -245,7 +281,18 @@ __device__ void kwWalkGroup(uint64_t xs[KW_GROUP][4],
   }
 
   // next centre = centre + KW_GROUP*G (complete addition, inv already computed)
-  kwAddPoint(ncx, ncy, cx, cy, (uint64_t *)nx, (uint64_t *)ny, dx[KW_HALF]);
+  kwAddPoint(ncx, ncy, cx, cy, nX, nY, dx[KW_HALF]);
+
+}
+
+// Forward walk (+G), the one used by the xpoint scan.
+KW_EMUL_STATIC __device__ void kwWalkGroup(uint64_t xs[KW_GROUP][4],
+                            uint64_t *ncx, uint64_t *ncy,
+                            uint64_t *cx, uint64_t *cy,
+                            const uint64_t *gx, const uint64_t *gy,
+                            const uint64_t *nx, const uint64_t *ny) {
+
+  kwWalkGroupSigned(xs, ncx, ncy, cx, cy, gx, gy, nx, ny, 1);
 
 }
 

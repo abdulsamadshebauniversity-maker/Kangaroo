@@ -126,15 +126,23 @@ $(TESTDIR)/test_pointwalk: tests/test_pointwalk.cpp GPU/GPUPointWalk.h GPU/GPUMa
 	@mkdir -p $(TESTDIR)
 	$(CXX) $(TESTFLAGS) -o $@ tests/test_pointwalk.cpp $(TESTCORE)
 
+check-bsgs: $(TESTDIR)/test_bsgs
+	@echo "Running GPU BSGS engine tests..."
+	@$(TESTDIR)/test_bsgs
+
+$(TESTDIR)/test_bsgs: tests/test_bsgs.cpp GPU/GPUBsgs.cpp GPU/GPUBsgs.h GPU/GPUBsgsKernel.h GPU/GPUPointWalk.h $(TESTCORE)
+	@mkdir -p $(TESTDIR)
+	$(CXX) $(TESTFLAGS) -o $@ tests/test_bsgs.cpp GPU/GPUBsgs.cpp $(TESTCORE)
+
 check-xpoint: $(TESTDIR)/test_xpoint
 	@echo "Running GPU xpoint kernel tests..."
 	@$(TESTDIR)/test_xpoint
 
-$(TESTDIR)/test_xpoint: tests/test_xpoint.cpp GPU/GPUXPointKernel.h GPU/GPUPointWalk.h $(TESTCORE)
+$(TESTDIR)/test_xpoint: tests/test_xpoint.cpp GPU/GPUXPoint.cpp GPU/GPUXPoint.h GPU/GPUXPointKernel.h GPU/GPUPointWalk.h $(TESTCORE)
 	@mkdir -p $(TESTDIR)
-	$(CXX) $(TESTFLAGS) -o $@ tests/test_xpoint.cpp $(TESTCORE)
+	$(CXX) $(TESTFLAGS) -o $@ tests/test_xpoint.cpp GPU/GPUXPoint.cpp $(TESTCORE)
 
-check: check-arithmetic check-pointwalk check-xpoint
+check: check-arithmetic check-pointwalk check-xpoint check-bsgs
 
 check-arithmetic: $(TESTDIR)/test_gpumath
 	@echo "Running device arithmetic tests..."

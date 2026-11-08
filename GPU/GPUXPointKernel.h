@@ -63,35 +63,10 @@ struct KWScanParams {
 };
 
 // ---------------------------------------------------------------------------------
-// Fingerprints, shared by device and host, must stay bit identical.
-// ---------------------------------------------------------------------------------
-
-KW_HOST_DEVICE uint64_t kwMixStep(uint64_t x) {
-
-  x ^= x >> 30; x *= 0xBF58476D1CE4E5B9ULL;
-  x ^= x >> 27; x *= 0x94D049BB133111EBULL;
-  x ^= x >> 31;
-  return x;
-
-}
-
-// 64 bit fingerprint of a 256 bit value (4 little endian 64 bit limbs)
-KW_HOST_DEVICE uint64_t kwFingerprint(const uint64_t *x) {
-
-  uint64_t h = 0x9E3779B97F4A7C15ULL;
-  h = kwMixStep(h ^ x[0]);
-  h = kwMixStep(h ^ x[1]);
-  h = kwMixStep(h ^ x[2]);
-  h = kwMixStep(h ^ x[3]);
-  return h;
-
-}
-
-// ---------------------------------------------------------------------------------
 // Kernel
 // ---------------------------------------------------------------------------------
 
-__global__ void kwXPointKernel(uint64_t *kangaroos,
+KW_EMUL_STATIC __global__ void kwXPointKernel(uint64_t *kangaroos,
                                const uint64_t *gTable,
                                const uint64_t *targets,
                                uint32_t *results,

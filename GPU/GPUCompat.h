@@ -97,6 +97,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <stdlib.h>
 
 #define __device__
 #define __host__
@@ -152,6 +153,37 @@ inline uint64_t kw_emul_brevll(uint64_t x) {
 #define __clz(x)   kw_emul_clz32(x)
 #define __brevll(x) kw_emul_brevll(x)
 #define __ldg(p)   (*(p))
+
+// ---------------------------------------------------------------------------------
+// CUDA runtime emulation (memory transfers only).
+//
+// The host drivers (GPU/GPUXPoint.cpp, GPU/GPUBsgs.cpp) are written once against
+// the real CUDA runtime; under KW_EMULATE the handful of calls they need are
+// mapped onto malloc/memcpy so the same driver code runs in the tests.
+// ---------------------------------------------------------------------------------
+
+typedef int cudaError_t;
+#define cudaSuccess 0
+
+inline cudaError_t cudaMalloc(void **p, size_t n) {
+  *p = (n ? calloc(1, n) : NULL);
+  return (*p || !n) ? cudaSuccess : 1;
+}
+inline cudaError_t cudaFree(void *p) { free(p); return cudaSuccess; }
+inline cudaError_t cudaMemcpy(void *d, const void *s, size_t n, int) {
+  memcpy(d, s, n); return cudaSuccess;
+}
+inline cudaError_t cudaMemset(void *d, int v, size_t n) {
+  memset(d, v, n); return cudaSuccess;
+}
+#define cudaMemcpyHostToDevice 0
+#define cudaMemcpyDeviceToHost 1
+#define cudaMemcpyDeviceToDevice 2
+#define cudaDeviceSynchronize() cudaSuccess
+#define cudaGetLastError() cudaSuccess
+#define cudaPeekAtLastError() cudaSuccess
+
+inline const char *cudaGetErrorString(cudaError_t) { return "emulated"; }
 #define __byte_perm(a,b,s) kw_emul_byte_perm((a),(b),(s))
 #define __threadfence() ((void)0)
 #define __syncwarp() ((void)0)

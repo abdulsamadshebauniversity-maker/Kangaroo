@@ -17,6 +17,7 @@
 #include "SECPK1/SECP256k1.h"
 #include "SECPK1/Random.h"
 #include "GPU/GPUXPointKernel.h"
+#include "GPU/GPUXPoint.h"
 
 static int nbTest = 0;
 static int nbFail = 0;
@@ -174,6 +175,50 @@ int main(int argc, char **argv) {
     std::vector<uint64_t> empty;
     std::vector<Match> found = runScan(secp, rangeStart, 4, 1, 2, 2, empty, 8);
     check(found.empty(), "no target -> no match");
+  }
+
+  // The same scenario through the host driver (GPU/GPUXPoint.h), the API the
+  // application uses.
+  {
+    Int start;
+    start.SetInt32(1234567);
+    const uint64_t groups = 400;
+    GPUXPoint xp(secp);
+    xp.SetParams(start, groups);
+    uint64_t offsets[3] = { 0, groups * KW_GROUP - 1, groups * KW_GROUP / 2 + 7 };
+    for (int i = 0; i < 3; i++) {
+      Int k;
+      k.Set(&start);
+      Int off;
+      off.SetInt32((int64_t)offsets[i]);
+      k.Add(&off);
+      Point P = secp->ComputePublicKey(&k);
+      xp.AddTarget(&P.x);
+    }
+    check(xp.Search() == 3, "driver: three targets found");
+    // the matches are reported in scan order, so look each planted key up
+    for (int i = 0; i < 3; i++) {
+      Int k;
+      k.Set(&start);
+      Int off;
+      off.SetInt32((int64_t)offsets[i]);
+      k.Add(&off);
+      bool seen = false;
+      for (uint32_t f = 0; f < xp.NbFound(); f++)
+        if (xp.GetFoundKey(f).IsEqual(&k))
+          seen = true;
+      check(seen, "driver: key matches a planted one");
+    }
+    Int outside;
+    outside.Set(&start);
+    Int off;
+    off.SetInt32((int64_t)(groups * KW_GROUP + 99));
+    outside.Add(&off);
+    Point P = secp->ComputePublicKey(&outside);
+    GPUXPoint xp2(secp);
+    xp2.SetParams(start, groups);
+    xp2.AddTarget(&P.x);
+    check(xp2.Search() == 0, "driver: key outside the interval not reported");
   }
 
   printf("\n%d checks, %d failures\n", nbTest, nbFail);
