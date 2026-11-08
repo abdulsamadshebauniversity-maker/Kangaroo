@@ -8,9 +8,9 @@ ifdef gpu
 SRC = SECPK1/IntGroup.cpp main.cpp SECPK1/Random.cpp \
       Timer.cpp SECPK1/Int.cpp SECPK1/IntMod.cpp \
       SECPK1/Point.cpp SECPK1/SECP256K1.cpp \
-      GPU/GPUEngine.o GPU/GPULaunch.o GPU/GPUBsgs.o GPU/GPUXPoint.o \
-      Kangaroo.cpp HashTable.cpp Backup.cpp Thread.cpp Check.cpp Network.cpp \
-      Merge.cpp PartMerge.cpp
+      GPU/GPUEngine.o GPU/GPUXPoint.o GPU/GPUBsgs.o \
+      Kangaroo.cpp HashTable.cpp GPUModes.cpp Backup.cpp Thread.cpp Check.cpp \
+      Network.cpp Merge.cpp PartMerge.cpp
 
 OBJDIR = obj
 
@@ -18,7 +18,7 @@ OBJET = $(addprefix $(OBJDIR)/, \
       SECPK1/IntGroup.o main.o SECPK1/Random.o \
       Timer.o SECPK1/Int.o SECPK1/IntMod.o \
       SECPK1/Point.o SECPK1/SECP256K1.o \
-      GPU/GPUEngine.o GPU/GPULaunch.o GPU/GPUXPoint.o \
+      GPU/GPUEngine.o GPU/GPUXPoint.o GPU/GPUBsgs.o \
       Kangaroo.o HashTable.o GPUModes.o Backup.o Check.o Network.o Merge.o \
       PartMerge.o)
 
@@ -89,13 +89,21 @@ $(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu | $(OBJDIR)/GPU
 endif
 endif
 
-# Both launch units (GPUEngine.cu and GPULaunch.cu) are compiled by nvcc; a GPU
-# build therefore needs the CUDA toolkit. Without it, the search modes are still
-# available through the emulator: "make emu" builds a CPU-only binary.
-$(OBJDIR)/GPU/GPULaunch.o: GPU/GPULaunch.cu GPU/GPULaunch.h GPU/GPUXPointKernel.h GPU/GPUBsgsKernel.h | $(OBJDIR)/GPU
-	$(NVCC) -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC \
-	  -ccbin $(CXXCUDA) -m64 -O2 $(if $(CUDA),-I$(CUDA)/include) -I. \
-	  -gencode=arch=compute_$(ccap),code=sm_$(ccap) -o $(OBJDIR)/GPU/GPULaunch.o -c GPU/GPULaunch.cu
+# The xpoint/BSGS host drivers include the kernel headers, so they are nvcc
+# units too: the kernels must be visible to the compiler that launches them.
+# A GPU build therefore needs the CUDA toolkit; without one the modes are still
+# available through the emulator ("make emu" builds a CPU-only binary).
+NVCCFLAGS  = -maxrregcount=0 --ptxas-options=-v --compile --compiler-options -fPIC \
+             -ccbin $(CXXCUDA) -m64 -O2 -I. $(if $(CUDA),-I$(CUDA)/include) \
+             -gencode=arch=compute_$(ccap),code=sm_$(ccap)
+
+$(OBJDIR)/GPU/GPUXPoint.o: GPU/GPUXPoint.cpp GPU/GPUXPoint.h GPU/GPUXPointKernel.h \
+                           GPU/GPUPointWalk.h GPU/GPULaunch.h | $(OBJDIR)/GPU
+	$(NVCC) $(NVCCFLAGS) -o $(OBJDIR)/GPU/GPUXPoint.o -c GPU/GPUXPoint.cpp
+
+$(OBJDIR)/GPU/GPUBsgs.o: GPU/GPUBsgs.cpp GPU/GPUBsgs.h GPU/GPUBsgsKernel.h \
+                         GPU/GPUPointWalk.h GPU/GPULaunch.h | $(OBJDIR)/GPU
+	$(NVCC) $(NVCCFLAGS) -o $(OBJDIR)/GPU/GPUBsgs.o -c GPU/GPUBsgs.cpp
 
 $(OBJDIR)/%.o : %.cpp
 	$(CXX) $(CXXFLAGS) -o $@ -c $<

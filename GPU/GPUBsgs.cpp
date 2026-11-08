@@ -27,12 +27,7 @@
 #include "GPUBsgs.h"
 #include "GPUBsgsKernel.h"
 
-// monotonic seconds (Timer::get_tick() is relative to Timer::Init())
-#include "GPULaunch.h"
-
-#ifdef KW_EMULATE
-#include "GPULaunchEmul.h"      // tests / CPU-only builds: SIMT emulator
-#endif
+#include "GPULaunch.h"          // kernel launches (nvcc or SIMT emulator)
 
 #include <cstdio>
 #include <cstring>
@@ -193,7 +188,7 @@ void GPUBSGS::BuildTable() {
   bp.groupPerThread = groupPerThread;
 
   double t0 = kwSeconds();
-  kwLaunchBaby(1, (int)nbThread, devKangaroo, devGT, devBabyX, &bp);
+  kwLaunchBaby(1, (int)nbThread, devKangaroo, devGT, devBabyX, bp);
   cudaDeviceSynchronize();
   timerBaby = kwSeconds() - t0;
 
@@ -339,7 +334,7 @@ bool GPUBSGS::Search() {
 
   double t0 = kwSeconds();
   kwLaunchGiant(1, (int)nbThread, devKangarooGiant, devBucketStart,
-                devBucketFp, devBucketPos, devResults, &gp);
+                devBucketFp, devBucketPos, devResults, gp);
   cudaDeviceSynchronize();
   timerGiant = kwSeconds() - t0;
 

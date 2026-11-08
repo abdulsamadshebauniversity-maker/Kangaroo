@@ -19,58 +19,65 @@
 * ---------------------------------------------------------------------------------
 * GPU/GPULaunch.h
 *
-* The kernel <<< >>> launch syntax is only understood by nvcc, so the host
-* drivers (GTUBsgs.cpp / GPUXPoint.cpp, compiled by g++) cannot call the
-* kernels directly. This header is the thin boundary between the two:
+* The only place where the kernels are launched. The host drivers
+* (GPU/GPUBsgs.cpp, GPU/GPUXPoint.cpp) call these inline functions and never
+* see a <<< >>>:
 *
-*   KW_EMULATE  : the launchers are inline and run the kernels through the
-*                 SIMT emulator of GPUCompat.h - one single build, no .cu file
-*                 needed, which is what the test suite uses.
-*   real CUDA   : the launchers are declared here and implemented in
-*                 GPU/GPULaunch.cu (compiled by nvcc), which includes the very
-*                 same kernel headers.
+*   GPU build    : the drivers are compiled by nvcc (see the Makefile), KW_LAUNCH
+*                  is the real kernel launch and the parameters travel by value.
+*   -DKW_EMULATE : KW_LAUNCH runs the kernel through the SIMT emulator of
+*                  GPUCompat.h, which is how the test suite exercises the very
+*                  same sources on a machine without GPU or CUDA toolkit.
 *
-* In both cases the parameters are plain structures, so the ABI across the
-* boundary is trivial.
+* Keeping the launch in one header means there is no second copy of the kernel
+* calls or of the parameter marshalling that could drift away from the kernels.
 * ---------------------------------------------------------------------------------
 */
 
 #ifndef GPULAUNCH_H
 #define GPULAUNCH_H
 
-#include <stdint.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-struct KWScanParams;
-struct KWBabyParams;
-struct KWGiantParams;
+#include "GPUXPointKernel.h"
+#include "GPUBsgsKernel.h"
 
 // xpoint scan
-void kwLaunchXPoint(int grid, int block,
-                    uint64_t *kangaroos, const uint64_t *gTable,
-                    const uint64_t *targets, uint32_t *results,
-                    const void *params, uint64_t *cursor);
+inline void kwLaunchXPoint(int grid, int block,
+                           uint64_t *kangaroos, const uint64_t *gTable,
+                           const uint64_t *targets, uint32_t *results,
+                           const KWScanParams &params, uint64_t *cursor) {
+
+  KW_LAUNCH(kwXPointKernel, grid, block, kangaroos, gTable, targets, results,
+            params, cursor);
+
+}
 
 // BSGS: baby table
-void kwLaunchBaby(int grid, int block,
-                  uint64_t *kangaroos, const uint64_t *gTable,
-                  uint64_t *bX, const void *params);
+inline void kwLaunchBaby(int grid, int block,
+                         uint64_t *kangaroos, const uint64_t *gTable,
+                         uint64_t *bX, const KWBabyParams &params) {
+
+  KW_LAUNCH(kwBabyKernel, grid, block, kangaroos, gTable, bX, params);
+
+}
 
 // BSGS: baby fingerprints
-void kwLaunchFingerprint(int grid, int block,
-                         const uint64_t *bX, uint64_t *bFp, uint32_t nbBaby);
+inline void kwLaunchFingerprint(int grid, int block,
+                                const uint64_t *bX, uint64_t *bFp,
+                                uint32_t nbBaby) {
+
+  KW_LAUNCH(kwFingerprintKernel, grid, block, bX, bFp, nbBaby);
+
+}
 
 // BSGS: giant steps
-void kwLaunchGiant(int grid, int block,
-                   uint64_t *kangaroos, const uint32_t *bucketStart,
-                   const uint64_t *bucketFp, const uint32_t *bucketPos,
-                   uint32_t *results, const void *params);
+inline void kwLaunchGiant(int grid, int block,
+                          uint64_t *kangaroos, const uint32_t *bucketStart,
+                          const uint64_t *bucketFp, const uint32_t *bucketPos,
+                          uint32_t *results, const KWGiantParams &params) {
 
-#ifdef __cplusplus
+  KW_LAUNCH(kwGiantKernel, grid, block, kangaroos, bucketStart, bucketFp,
+            bucketPos, results, params);
+
 }
-#endif
 
 #endif // GPULAUNCH_H

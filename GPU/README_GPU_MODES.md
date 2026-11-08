@@ -15,9 +15,8 @@ GPU/GPUXPointKernel.h  device side of the xpoint scan
 GPU/GPUXPoint.{h,cpp}  host driver of the xpoint scan
 GPU/GPUBsgsKernel.h    device side of BSGS (babies, fingerprints, giants)
 GPU/GPUBsgs.{h,cpp}    host driver of BSGS
-GPU/GPULaunch.h        kernel launch boundary (".cu" side)
-GPU/GPULaunch.cu       nvcc implementation of the launchers
-GPU/GPULaunchEmul.h    the same launchers through the SIMT emulator
+GPU/GPULaunch.h        the only place that launches a kernel (nvcc <<<>>> or emulator)
+GPUModes.cpp           command line front end (--mode xpoint | --mode bsgs)
 tests/test_xpoint.cpp  xpoint kernel + driver tests
 tests/test_bsgs.cpp    BSGS pipeline tests
 tests/bench_gpu.cpp    throughput of both modes
@@ -138,13 +137,17 @@ an order of magnitude per key on the same hardware.
 
 ### 2.5 Host/device boundary
 
-`GPU/GPULaunch.h` is the only place that knows about `<<< >>>`:
+`GPU/GPULaunch.h` is the only place that knows about `<<< >>>`; the four
+`kwLaunchXxx()` inline functions forward to `KW_LAUNCH`:
 
-* `-DKW_EMULATE` → `GPU/GPULaunchEmul.h` runs the kernels through the SIMT
-  emulator of `GPUCompat.h` (no CUDA toolchain, no GPU);
-* real CUDA → `GPU/GPULaunch.cu`, compiled by `nvcc`, includes the same kernel
-  headers. The drivers (`GPUBsgs.cpp`, `GPUXPoint.cpp`) are plain C++ and are
-  compiled once.
+* `-DKW_EMULATE` → `KW_LAUNCH` runs the kernel through the SIMT emulator of
+  `GPUCompat.h` (no CUDA toolchain, no GPU);
+* real CUDA → `KW_LAUNCH` *is* the kernel launch.
+
+Because the drivers include the kernel headers, the two of them
+(`GPU/GPUXPoint.cpp`, `GPU/GPUBsgs.cpp`) are compiled by `nvcc` in the GPU
+build and by g++ in the emulated build - the same source, two compilers, no
+duplicated marshalling code.
 
 `GPUCompat.h` also provides a small CUDA runtime shim under emulation
 (`cudaMalloc`/`cudaMemcpy`/`cudaMemset`/`cudaDeviceSynchronize`), so the driver
@@ -233,9 +236,10 @@ make gpu=1 ccap=86          # ccap = compute capability of your card
 * `CUDA`, `NVCC`, `CXXCUDA` (host compiler for nvcc) and `ccap` are variables;
   the old hardcoded `cuda-8.0` + `g++-4.8` pair was removed, it does not exist
   on current systems and cannot build the C++11 headers of the project.
-* `GPU/GPULaunch.cu` is compiled by `nvcc` into `obj/GPU/GPULaunch.o`; the
-  drivers and the rest of the program stay plain C++.
-* `make check` builds the emulator variant, which does not need CUDA at all.
+* `GPU/GPUXPoint.cpp` and `GPU/GPUBsgs.cpp` are compiled by `nvcc` (they include
+  the kernel headers), the rest of the program stays plain g++.
+* `make check` and `make emu` build the emulator variant, which does not need
+  CUDA at all - `make emu` produces `kangaroo-emu`, a fully usable binary.
 
 ### What the emulation does not cover
 
@@ -248,7 +252,24 @@ counter, but a run on real hardware remains mandatory before production use.
 
 ---
 
-## 7. Using the engines
+## 7. Using the modes
+
+From the command line (`make emu` for a CPU-only binary, `make gpu=1` for CUDA):
+
+```bash
+# xpoint scan of 200000 keys starting at 0x120000, one x target
+./kangaroo --mode xpoint --start 0x120000 --range 200000 \
+           --x 8208F5AB...782F
+
+# BSGS over the same interval, 4096 babies
+./kangaroo --mode bsgs --start 0x120000 --range 200000 \
+           --pubkey 04 8208F5AB...782F B7A0AC7E...D4DA --m 4096
+```
+
+Both print `key=<hex> x=<hex>` per verified match; `make check-cli` runs
+exactly that as a smoke test.
+
+### 7.1 Using the engines
 
 ### Xpoint (GPU/GPUXPoint.h)
 
