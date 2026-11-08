@@ -118,6 +118,16 @@ TESTCORE  = SECPK1/Int.cpp SECPK1/IntMod.cpp SECPK1/IntGroup.cpp \
             SECPK1/SECP256K1.cpp SECPK1/Point.cpp SECPK1/Random.cpp Timer.cpp
 TESTFLAGS = -O2 -m64 -mssse3 -DKW_EMULATE -Wno-write-strings -I.
 
+check-pointwalk: $(TESTDIR)/test_pointwalk
+	@echo "Running GPU group walk tests..."
+	@$(TESTDIR)/test_pointwalk 5
+
+$(TESTDIR)/test_pointwalk: tests/test_pointwalk.cpp GPU/GPUPointWalk.h GPU/GPUMath.h GPU/GPUCompat.h $(TESTCORE)
+	@mkdir -p $(TESTDIR)
+	$(CXX) $(TESTFLAGS) -o $@ tests/test_pointwalk.cpp $(TESTCORE)
+
+check: check-arithmetic check-pointwalk
+
 check-arithmetic: $(TESTDIR)/test_gpumath
 	@echo "Running device arithmetic tests..."
 	@$(TESTDIR)/test_gpumath 64
