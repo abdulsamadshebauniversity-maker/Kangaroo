@@ -19,6 +19,7 @@
 #define GPUENGINEH
 
 #include <vector>
+#include <cstdint>
 #include "../Constants.h"
 #include "../SECPK1/SECP256k1.h"
 
